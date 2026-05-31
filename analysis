@@ -1,0 +1,435 @@
+# SUPERVISED
+
+from sklearn.linear_model import LogisticRegression
+from sklearn.feature_selection import SequentialFeatureSelector
+from sklearn.model_selection import train_test_split
+import pandas as pd 
+
+# Peformed a z-score on the data and decided to drop all rows that were outside and including 3 standard deviations away 
+
+df_new = df.drop(['Region','Smoking_Status'], axis=1)
+df_new.head()
+
+# Data cleaning and preprocessing
+#  - Notes Part1 - MD2 (see for details and security frameworks) and Data Cleaning and Preprocessing file MD2
+
+# 1. Understand the dataset 
+# 2. Identify missing values - bottom of Notes Part 2 - MD2 
+    #  Missing values securely framework 
+    # Remove rows/columns
+    # Fill missing values
+# 3. Detect Outliers
+# 4. Identify data entry errors 
+# 5. Validate data consistency 
+
+# Logistic Regression
+
+# one hot encode, standardise
+
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegression
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.metrics import classification_report, confusion_matrix, log_loss
+import os
+
+# One hot encode 
+encoder = OneHotEncoder(sparse_output=False, handle_unknown='ignore', drop='first')
+
+gen_encoded = encoder.fit_transform(df[['Gender']])
+
+feature_names = encoder.get_feature_names_out(['Gender'])
+
+gender_df = pd.DataFrame(gen_encoded, columns=feature_names, index=df.index)
+
+df = df_new.drop(columns=['Gender'])
+df_enc = pd.concat([df, gender_df], axis=1)
+
+# Reorder 
+
+new_cols = ['CustomerID', 'Gender_Male','Age','Tenure_Years','Visits_Per_Year','Satisfaction_Score','Has_Chronic_Condition',
+            'Premium_Amount','BMI', 'Num_Claims_Last_Year','Avg_Claim_Amount','Exercise_Hours_Per_Week','Churn']
+df_encR = df_enc.reindex(columns=new_cols)
+df_encR.head()
+
+# Data split encoded data - customer ID column drop - and Scaled
+
+X = df_encR.drop(columns=['CustomerID', 'Churn'])
+y = df_encR['Churn']
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.20, random_state=42, stratify=y) # Stratified train-test split ensures that the proportion of different classes in your dataset is maintained in both the training and testing sets. This is particularly useful for unbalanced datasets, as it helps to create a more representative sample for model training and evaluation.
+
+# Normalise after because scaler sees test data and computes mean/std using test rows = model gets unrealistic good test performance
+
+scaler = StandardScaler() # this does not like categorical variables 
+
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+
+X_train_scaled = pd.DataFrame(X_train_scaled, columns=X_train.columns, index=X_train.index)
+X_test_scaled  = pd.DataFrame(X_test_scaled,  columns=X_test.columns,  index=X_test.index)
+
+# Hyperparameter tuning - not used model worsened with adding regularisation 
+penalty = 'elasticnet'
+C = 0.2
+
+model = LogisticRegression(class_weight='balanced', max_iter=1000, solver='lbfgs', random_state=42)
+
+model.fit(X_train_scaled, y_train)
+
+y_pred = model.predict(X_test_scaled)
+
+print(classification_report(y_test, y_pred, digits=4))
+print("\nConfusion Matrix:")
+print(confusion_matrix(y_test, y_pred))
+print(log_loss(y_true=y_test, y_pred=y_pred)) # Used for hyperparamter tuning 
+
+# test (generalisation) accuracy
+
+# Display the model's learned coefficients
+print(f"Intercept: {model.intercept_}")
+print(f"Coefficient: {model.coef_[0]}")
+
+# Cross validation to minimise log-loss - the model's accuracy in predicting whether a client will churn or not
+
+# Used for hyperparamter tuning 
+
+from sklearn.model_selection import cross_val_score
+import numpy as np
+X = X_train_scaled
+y = y_train
+
+# Perform 5-fold cross-validation and calculate accuracy for each fold
+cv_scores = cross_val_score(model, X, y, cv=5, scoring='accuracy')
+
+# Display the accuracy for each fold and the mean accuracy
+print(f'Cross-validation accuracies: {cv_scores}')
+print(f'Mean cross-validation accuracy: {np.mean(cv_scores)}')
+
+import seaborn as sns
+
+x = df['Visits_Per_Year']
+y = df['Churn']
+
+sns.regplot(x=x, y=y, data=df, logistic=True, ci=None)
+
+from sklearn.metrics import roc_curve, auc
+import matplotlib.pyplot as plt
+# Calculate ROC curve
+fpr, tpr, thresholds = roc_curve(y_test, y_pred) 
+roc_auc = auc(fpr, tpr)
+# Plot the ROC curve
+plt.figure()  
+plt.plot(fpr, tpr, label='ROC curve (area = %0.2f)' % roc_auc)
+plt.plot([0, 1], [0, 1], 'k--', label='No Skill')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('ROC Curve for Churn Classification')
+plt.legend()
+plt.show()
+
+# Random Forest
+
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import classification_report, confusion_matrix
+
+# After categorical scaling - one hot encoding - gender to numerical 
+
+X = df_encR.drop(columns=['CustomerID', 'Churn'])
+y = df_encR['Churn']
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.20, random_state=42, stratify = y)
+
+# Train the random forest model - n_jobs part of fine tuning now and in future dependent on dataset
+rf_classifier = RandomForestClassifier(n_estimators=10, max_depth=10, min_samples_split=5, min_samples_leaf=3, max_features='sqrt', class_weight='balanced_subsample', random_state=42)
+rf_classifier.fit(X_train, y_train)
+
+# Use Model to predict 
+
+y_pred = rf_classifier.predict(X_test)
+
+print(classification_report(y_test, y_pred, digits=4))
+
+print("\nConfusion Matrix:")
+print(confusion_matrix(y_test, y_pred))
+
+# Random Forest Visualisation
+
+import matplotlib.pyplot as plt
+from sklearn.tree import plot_tree
+
+# tree.plot_tree(rf_classifier) can only be for decision tree classifier hence getting one tree in the code example 
+
+# Get Importance
+
+importance = rf_classifier.feature_importances_
+
+
+# Summarise Random Forest feature importance
+for i, v in enumerate(importance):
+    print(f'Feature: {i}, Score: {v:.5f}')
+
+fig, ax = plt.subplots(figsize=(20, 10))
+feature_names = ['Gender_Male', 'Age',	'Tenure_Years','Visits_Per_Year', 'Satisfaction_Score','Has_Chronic_Condition','Premium_Amount','BMI','	Num_Claims_Last_Year','Avg_Claim_Amount','Exercise_Hours_Per_Week']
+ax.bar(feature_names, importance)
+ax.set_xlabel('Gini Importance')
+ax.set_ylabel('Importance to patient leaving') # is this bias against the dataset that it has
+plt.tight_layout()
+plt.show()
+
+from sklearn.metrics import roc_curve, auc
+import matplotlib.pyplot as plt
+# Calculate ROC curve
+fpr, tpr, thresholds = roc_curve(y_test, y_pred) 
+roc_auc = auc(fpr, tpr)
+# Plot the ROC curve
+plt.figure()  
+plt.plot(fpr, tpr, label='ROC curve (area = %0.2f)' % roc_auc)
+plt.plot([0, 1], [0, 1], 'k--', label='No Skill')
+plt.xlim([0.0, 1.0])
+plt.ylim([0.0, 1.05])
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.title('ROC Curve for Churn Classification')
+plt.legend()
+plt.show()
+
+print(classification_report(y_test, y_pred, digits=4))
+
+print("\nConfusion Matrix:")
+print(confusion_matrix(y_test, y_pred))
+
+# Gradient Boosting - # do the hyper parameter tuning 
+
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report
+
+
+
+X = df_encR.drop(columns=['CustomerID', 'Churn'])
+y = df_encR['Churn']
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.20, random_state=42, stratify = y)
+
+gbc = GradientBoostingClassifier(n_estimators=10, learning_rate=0.05, random_state=100, max_features=7)
+                                 
+gbc.fit(X_train, y_train)
+
+pred_y = gbc.predict(X_test)
+
+print(classification_report(y_test, y_pred, digits=4))
+
+print("\nConfusion Matrix:")
+print(confusion_matrix(y_test, y_pred))
+
+from sklearn.model_selection import train_test_split, GridSearchCV
+
+
+# Define parameter grid
+param_grid = {
+    'learning_rate': [0.01, 0.1, 0.2],
+    'n_estimators': [100, 200, 300],
+    'max_depth': [3, 5, 7]
+}
+
+# Perform grid search
+grid_search = GridSearchCV(estimator=GradientBoostingClassifier(random_state=42),
+                           param_grid=param_grid,
+                           cv=5,
+                           scoring='neg_mean_squared_error')
+grid_search.fit(X_train, y_train)
+
+# Report best score and parameters
+print(f"Best score: {-grid_search.best_score_:.3f}")
+print(f"Best parameters: {grid_search.best_params_}")
+
+# Evaluate on test set
+best_model = grid_search.best_estimator_
+test_score = best_model.score(X_test, y_test)
+print(f"Test set R^2 score: {test_score:.3f}")
+
+# Gradient Boosting Visual Inspection
+
+from sklearn.inspection import PartialDependenceDisplay
+
+df_slim = df[['Age', 'Satisfaction_Score','Churn']] # change this 
+
+features = [1,2]
+PartialDependenceDisplay.from_estimator(gbc, df_slim, features)
+
+# Get Importance Gradient Boosting
+
+importance = gbc.feature_importances_
+
+# Summarise feature importance
+
+# Summarize feature importance
+for i, v in enumerate(importance):
+    print(f'Feature: {i}, Score: {v:.5f}')
+
+fig, ax = plt.subplots(figsize=(20, 10))
+feature_names = ['Gender_Male', 'Age',	'Tenure_Years','Visits_Per_Year', 'Satisfaction_Score','Has_Chronic_Condition','Premium_Amount','BMI','	Num_Claims_Last_Year','Avg_Claim_Amount','Exercise_Hours_Per_Week']
+ax.bar(feature_names, importance)
+ax.set_xlabel('Gini Importance')
+ax.set_ylabel('Importance to patient leaving') # is this bias against the dataset that it has
+plt.tight_layout()
+plt.show()
+
+# CUSTOMER SEGMENTATION - UNSUPERVISED
+
+# Customer segmentation from previous notebook
+
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.cluster import KMeans
+
+# Whole dataset one hot encode preferably all categorical columns , standard scale and lose Customer ID as irrelevant
+
+df_kmeans = df.drop(['CustomerID'], axis=1)
+df_kmeans.head()
+
+# Feature Selection - forward selection 
+
+
+# Define model 
+model = KMeans(n_clusters=3, random_state=42, init='k-means++', n_init=20, max_iter=300)
+
+# Forward selection
+sfs = SequentialFeatureSelector(model, n_features_to_select=7, direction='forward')
+sfs.fit(df_kmeans, )
+
+# Selected features
+print("Selected features:", sfs.get_support())
+
+# Scale data
+
+
+scaler = StandardScaler().set_output(transform="pandas") 
+
+df_kmeans = scaler.fit_transform(df_kmeans)
+df_kmeans.head()
+
+# Elbow Method - for kmeans 
+
+# Calculate the WCSS for different values of k
+wcss = []
+for i in range(1, 11):
+    kmeans = KMeans(n_clusters=i, random_state=42)
+    kmeans.fit(df_tsne)
+    wcss.append(kmeans.inertia_)
+
+# Plot the WCSS to visualize the Elbow
+plt.plot(range(1, 11), wcss, marker='o')
+plt.title('Elbow Method for Optimal k')
+plt.xlabel('Number of Clusters')
+plt.ylabel('WCSS')
+plt.show()
+
+# Initialize and fit K-Means
+kmeans = KMeans(n_clusters=3, random_state=42, init='k-means++', n_init=20, max_iter=300, )
+kmeans.fit(df_kmeans)
+
+# Add cluster labels to the original dataframe
+df_kmeans['KMeans_Cluster'] = kmeans.labels_
+
+# Display the first few rows with cluster labels
+print(df_kmeans.head())
+
+# Kmeans visualisation
+
+plt.scatter(df_kmeans['Age'], df_kmeans['Sleep_Hours_Avg'], c=df_kmeans['KMeans_Cluster'], cmap='viridis')
+plt.title('K-Means Clustering of Customers')
+plt.xlabel('Age')
+plt.ylabel('Sleep_Hours_Avg')
+plt.show()
+
+# TSNE
+
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
+
+# Apply t-SNE to reduce dimensions to 2
+tsne = TSNE(n_components=2, perplexity=50, random_state=42)
+df_tsne = tsne.fit_transform(df_kmeans) 
+
+# Convert the t-SNE result back to a DataFrame
+df_tsne = pd.DataFrame(df_tsne, columns=['t-SNE1', 't-SNE2'])
+print(df_tsne.head())
+
+# Plot the t-SNE components
+
+plt.scatter(df_tsne['t-SNE1'], df_tsne['t-SNE2'], c=df_kmeans['KMeans_Cluster'], cmap='viridis')
+plt.title('t-SNE - Dimensionality Reduction')
+plt.xlabel('t-SNE1')
+plt.ylabel('t-SNE2')
+plt.show()
+
+# PCA
+
+# Apply PCA to reduce dimensions from 15 to 2
+
+# This allows manifold learning taking more features from a high dimensional structure to a lower dimensional structure but ensuring
+#...all features have a representation in this lower structure, hopefully providing the output with a greater understanding of the segmentation
+
+pca = PCA(n_components=2)
+df_pca = pca.fit_transform(df_kmeans)
+
+explained_variance = pd.DataFrame([pca.explained_variance_ratio_,      # Extract explained variance per component
+                                   pca.explained_variance_ratio_.cumsum()]).T
+explained_variance.columns = ['Exp Var', 'Cum Exp Var']
+explained_variance          
+
+# Re-run to show how many components it took 
+
+pca = PCA(n_components=8)
+df_pca = pca.fit_transform(df_kmeans)
+
+explained_variance = pd.DataFrame([pca.explained_variance_ratio_,     
+                                   pca.explained_variance_ratio_.cumsum()]).T
+explained_variance.columns = ['Exp Var', 'Cum Exp Var']
+explained_variance 
+
+# Convert back to DataFrame for easy handling
+df_pca = pd.DataFrame(df_pca, columns=['PCA1', 'PCA2'])
+print(df_pca.head())
+
+# Plot the PCA components
+
+plt.scatter(df_pca['PCA1'], df_pca['PCA2'], c=df_kmeans['KMeans_Cluster'], cmap='viridis')
+plt.title('PCA - Dimensionality Reduction')
+plt.xlabel('PCA1')
+plt.ylabel('PCA2')
+plt.show()
+
+#Post PCA K-means
+
+# Initialize and fit K-Means
+kmeans = KMeans(n_clusters=3, random_state=42, init='k-means++', n_init=20, max_iter=300, )
+kmeans.fit(df_pca)
+
+# Add cluster labels to the original dataframe
+df_pca['KMeans_Cluster'] = kmeans.labels_
+
+# Display the first few rows with cluster labels
+print(df_pca.head())
+
+plt.scatter(df_pca['PCA1'], df_pca['PCA2'], c=df_kmeans['KMeans_Cluster'], cmap='viridis')
+plt.title('PCA - Dimensionality Reduction')
+plt.xlabel('PCA1')
+plt.ylabel('PCA2')
+plt.show()
+
+# Add business related columns 
+
+# redefines the dataset and excludes the regions encoding 
+ 
+df_enc = df.assign(
+   
+   Spending_Intensity     = df['Premium_Amount'] / df['Tenure_Years'],
+  Claim_Frequency        = df['Num_Claims_Last_Year'] / df['Tenure_Years'],
+   Engagement_Score       = df['Visits_Per_Year'] + df['Exercise_Hours_Per_Week']
+)
